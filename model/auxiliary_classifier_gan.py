@@ -2,9 +2,10 @@ import os
 import time
 import datetime
 
+from .discriminator import Discriminator
+from .generator import Generator
 from data import Data
 from matplotlib import pyplot
-from model import Discriminator, Generator
 from tensorflow.keras.layers import BatchNormalization
 from tensorflow.keras.models import Model
 from tensorflow.keras.optimizers import Adam
@@ -49,13 +50,13 @@ class AuxiliaryClassifierGAN:
         model.compile(loss=['binary_crossentropy', 'sparse_categorical_crossentropy'], optimizer=opt)
         return model
 
-    def train(self, epochs, batchSize, evalFreq):
+    def train(self, params):
         if not os.path.exists(self.evalDirectoryName):
             os.makedirs(self.evalDirectoryName)
 
-        self.epochs = epochs
-        self.batchSize = batchSize
-        self.evalFreq = evalFreq
+        self.epochs = params.epochs
+        self.batchSize = params.batchsize
+        self.evalFreq = params.evalfreq
         self.batchesPerEpoch = int(self.data.getDatasetShape() / self.batchSize)
         self.halfBatch = int(self.batchSize / 2)
         self.writeTrainingParameters()

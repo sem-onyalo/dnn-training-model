@@ -60,6 +60,9 @@ class Discriminator:
 
         return layer
 
+    def train(self, params):
+        raise Exception('Not supported')
+
     def summary(self):
         print('\nDiscriminator\n')
         model = self.buildModel()

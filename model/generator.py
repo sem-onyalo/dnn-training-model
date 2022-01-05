@@ -58,7 +58,10 @@ class Generator:
         outLayer = Dropout(self.dropoutRate)(layer)
         return outLayer
 
+    def train(self, params):
+        raise Exception('Not supported')
+
     def summary(self):
-        print('\Generator\n')
+        print('\nGenerator\n')
         model = self.buildModel()
         model.summary()
