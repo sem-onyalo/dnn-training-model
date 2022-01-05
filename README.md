@@ -2,6 +2,10 @@
 
 A repository to train TensorFlow GAN models and generate images.
 
+## Dependencies
+
+* Python==3.9.1
+
 ## Install
 
 ### Linux
