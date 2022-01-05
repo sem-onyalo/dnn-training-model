@@ -3,13 +3,14 @@ import argparse
 from data import Data
 from inference import Inference
 from model import AuxiliaryClassifierGAN, Discriminator
+from model.generator import Generator
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
 
-    parser.add_argument('--summary', '-s', action='store_true', help='Output model summary only.')
-    parser.add_argument('--inference', '-s', action='store_true', help='Run inference using an existing model. Model path must be supplied.')
-    parser.add_argument('--train', '-s', action='store_true', help='Train the model.')
+    parser.add_argument('--summary', action='store_true', help='Output model summary only.')
+    parser.add_argument('--inference', action='store_true', help='Run inference using an existing model. Model path must be supplied.')
+    parser.add_argument('--train', action='store_true', help='Train the model.')
     
     parser.add_argument('--modelType', '-m', type=str, default='aux', help='The type of model to load')
     parser.add_argument('--latentDim', '-d', type=int, default=100, help='Latent space dimension')
@@ -43,12 +44,14 @@ if __name__ == '__main__':
             model = AuxiliaryClassifierGAN(data, args)
         elif args.modelType == "discriminator":
             model = Discriminator(data, args)
+        elif args.modelType == "generator":
+            model = Generator(data, args)
 
         if model != None:
             if args.summary:
                 model.summary()
             
             if args.train:
-                model.train(args.epochs, args.batchsize, args.evalfreq)
+                model.train(args)
         else:
             raise Exception(f'Invalid model type {args.modelType}')
