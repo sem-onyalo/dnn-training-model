@@ -1,8 +1,20 @@
 # GAN Model Training
 
-A repository to train TensorFlow GAN models.
+A repository to train TensorFlow GAN models and generate images.
 
 ## Install
+
+### Linux
+
+```
+python -m venv env
+
+source env/bin/activate
+
+pip install -r requirements.txt
+```
+
+### Windows
 
 ```
 python -m venv env
@@ -21,11 +33,11 @@ python main.py --summary
 ## Train
 
 ```
-python main.py
+python main.py --train
 ```
 
 ## Generate Images
 
 ```
-python main.py --modelPath <path-to-model>
+python main.py --inference --modelPath <path-to-model>
 ```
