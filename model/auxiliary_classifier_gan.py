@@ -1,17 +1,18 @@
-import os
-import time
 import datetime
+import time
 
 from .discriminator import Discriminator
 from .generator import Generator
 from data import Data
 from matplotlib import pyplot
+from storage import StorageLocal
 from tensorflow.keras.layers import BatchNormalization
 from tensorflow.keras.models import Model
 from tensorflow.keras.optimizers import Adam
 
 class AuxiliaryClassifierGAN:
     def __init__(self, data:Data, params=None) -> None:
+        self.trainDateTimeUtc = datetime.MINYEAR
         self.evalDirectoryName = params.evalDirLocal
         self.initHyperparameters(params)
         self.initMetricsVars()
@@ -29,14 +30,103 @@ class AuxiliaryClassifierGAN:
     def initHyperparameters(self, params):
         self.adamLearningRate = params.adamLearningRate
         self.adamBeta1 = params.adamBeta1
+        self.latentDim = params.latentDim
+        self.labelDim = params.labelDim
+        self.batchNorm = params.batchNorm
+        self.convFilters = [int(x) for x in params.convFilters.split(',')]
+        self.convTransposeFilters = [int(x) for x in params.convTransposeFilters.split(',')]
+        self.kernelInitStdDev = params.kernelInitStdDev
+        self.generatorInputFilters = params.generatorInputFilters
+        self.leakyReluAlpha = params.leakyReluAlpha
+        self.dropoutRate = params.dropoutRate
+        self.convLayerKernelSize = (3,3)
+        self.convTransposeLayerKernelSize = (4,4)
+        self.generatorOutputLayerKernelSize = (7,7)
 
     def initMetricsVars(self):
+        self.metricHeader = ["Epoch", "Epochs", "Mini-Batch", "Mini-Batches", "Discriminator Loss: Real", "Discriminator Loss: Fake", "GAN Loss"]
+        self.metricHistory = list()
+        self.lossHistory = list()
         self.realBinaryLossHistory = list()
         self.realLabelsLossHistory = list()
         self.fakeBinaryLossHistory = list()
         self.fakeLabelsLossHistory = list()
-        self.lossHistory = list()
-        self.metricHistory = list()
+        self.storage = list()
+
+    def initStorage(self):
+        self.trainDateTimeUtc = datetime.datetime.utcnow()
+        self.storage.append(StorageLocal(root=self.evalDirectoryName, datetime=self.trainDateTimeUtc))
+
+    def writeHyperparameters(self):
+        hyperparameters = {
+            "latentDim": self.latentDim,
+            "labelDim": self.labelDim,
+            "batchNorm": self.batchNorm,
+            "adamLearningRate": self.adamLearningRate,
+            "adamBeta1": self.adamBeta1,
+            "kernelInitStdDev": self.kernelInitStdDev,
+            "leakyReluAlpha": self.leakyReluAlpha,
+            "dropoutRate": self.dropoutRate,
+            "epochs": self.epochs,
+            "batchSize": self.batchSize,
+            "evalFreq": self.evalFreq,
+            "batchesPerEpoch": self.batchesPerEpoch,
+            "halfBatch": self.halfBatch,
+            "convFilters": self.convFilters,
+            "convTransposeFilters": self.convTransposeFilters,
+            "generatorInputFilters": self.generatorInputFilters,
+            "convLayerKernelSize": self.convLayerKernelSize,
+            "convTransposeLayerKernelSize": self.convTransposeLayerKernelSize,
+            "generatorOutputLayerKernelSize": self.generatorOutputLayerKernelSize
+        }
+
+        for item in self.storage:
+            item.writeHyperparameters(hyperparameters)
+
+    def writeSamplesInit(self, samples=150):
+        xReal, _ = self.data.generateRealTrainingSamples(samples)
+        xFake, _ = self.data.generateFakeTrainingSamples(self.generator, self.latentDim, samples)
+
+        for item in self.storage:
+            item.writeTargetSamples(xReal)
+            item.writeGeneratedSamples(0, xFake)
+
+    def writeMetrics(self, epoch):
+        for item in self.storage:
+            item.writeMetrics(epoch, self.metricHistory)
+
+        self.metricHistory.clear()
+
+    def writeSamples(self, epoch, samples=150):
+        xFake, _ = self.data.generateFakeTrainingSamples(self.generator, self.latentDim, samples, False)
+
+        for item in self.storage:
+            item.writeGeneratedSamples(epoch, xFake)
+
+    def writeSummary(self, epoch, **kwargs):
+        summary = {
+            "Epoch": epoch,
+            "Real Accuracy": kwargs["realAcc"],
+            "Fake Accuracy": kwargs["fakeAcc"],
+            "Elapsed Time": kwargs["elapsedTime"]
+        }
+
+        for item in self.storage:
+            item.writeSummary(epoch, summary)
+
+        print(f'Summary: {summary}')
+
+    def writeLossAndAccuracy(self, epoch):
+        history = {
+            "dLossReal": self.realBinaryLossHistory,
+            "dLossFake": self.fakeBinaryLossHistory,
+            "gLoss": self.lossHistory,
+            "accReal": self.realLabelsLossHistory,
+            "accFake": self.fakeLabelsLossHistory
+        }
+
+        for item in self.storage:
+            item.writeLossAndAccuracy(epoch, history)
 
     def buildModel(self) -> Model:
         for layer in self.discriminator.layers:
@@ -51,17 +141,17 @@ class AuxiliaryClassifierGAN:
         return model
 
     def train(self, params):
-        if not os.path.exists(self.evalDirectoryName):
-            os.makedirs(self.evalDirectoryName)
+        self.initStorage()
 
         self.epochs = params.epochs
         self.batchSize = params.batchsize
         self.evalFreq = params.evalfreq
         self.batchesPerEpoch = int(self.data.getDatasetShape() / self.batchSize)
         self.halfBatch = int(self.batchSize / 2)
-        self.writeTrainingParameters()
 
-        self.plotStartingImageSamples()
+        self.writeHyperparameters()
+
+        self.writeSamplesInit()
 
         self.startTime = time.time()
 
@@ -82,109 +172,41 @@ class AuxiliaryClassifierGAN:
                 self.fakeLabelsLossHistory.append(dFakeLossLabels)
                 self.lossHistory.append(gLossBinary)
 
-                metrics = ('> %d, %d/%d, dRealLossBinary=%.3f, dFakeLossBinary=%.3f, gLossBinary=%.3f' %
-                    (i + 1, j, self.batchesPerEpoch, dRealLossBinary, dFakeLossBinary, gLossBinary))
+                metrics = [i + 1, self.epochs, j + 1, self.batchesPerEpoch, dRealLossBinary, dFakeLossBinary, gLossBinary]
+                print(list(map(lambda x,y: {x: y}, self.metricHeader, metrics)))
                 self.metricHistory.append(metrics)
-                print(metrics)
+
+                # - DEBUG - DEBUG - DEBUG - DEBUG - DEBUG - DEBUG - DEBUG - DEBUG - DEBUG - DEBUG
+                if j > 4:
+                    break
+
+            self.evaluate(i + 1)
+            return
+            # - DEBUG - DEBUG - DEBUG - DEBUG - DEBUG - DEBUG - DEBUG - DEBUG - DEBUG - DEBUG
 
             if (i + 1) % self.evalFreq == 0:
                 self.evaluate(i + 1)
 
     def evaluate(self, epoch, samples=150):
         [xReal, xRealLabel], yReal = self.data.generateRealTrainingSamples(samples)
+
         # TODO: unpack results properly (i.e. figure out which output values are which)
         _, dRealAcc, _, _, _ = self.discriminator.evaluate(xReal, [yReal, xRealLabel])
 
         [xFake, xFakeLabel], yFake = self.data.generateFakeTrainingSamples(self.generator, self.latentDim, samples)
         _, dFakeAcc, _, _, _ = self.discriminator.evaluate(xFake, [yFake, xFakeLabel])
 
-        accuracyMetrics = '> %d, accuracy real: %.0f%%, fake: %.0f%%' % (epoch, dRealAcc * 100, dFakeAcc * 100)
-        self.metricHistory.append(accuracyMetrics)
-        print(accuracyMetrics)
-
-        elaspedTime = f'> {epoch}, elapsed time: {self.getElapsedTime()}'
-        self.metricHistory.append(elaspedTime)
-        print(elaspedTime)
-
         modelFilename = '%s/generated_model_e%03d.h5' % (self.evalDirectoryName, epoch)
-        self.generator.save(modelFilename)
+        # self.generator.save(modelFilename)
 
-        metricsFilename = '%s/metrics_e%03d.txt' % (self.evalDirectoryName, epoch)
-        with open(metricsFilename, 'w') as fd:
-            for i in self.metricHistory:
-                fd.write(i + '\n')
-            self.metricHistory.clear()
+        self.writeMetrics(epoch)
+        self.writeSamples(epoch)
+        self.writeLossAndAccuracy(epoch)
+        self.writeSummary(epoch, realAcc=dRealAcc, fakeAcc=dFakeAcc, elapsedTime=self.getElapsedTimeStr())
 
-        outputPath = f'{self.evalDirectoryName}/generated_plot_e{epoch}_random.png'
-        self.plotImageSamples([xFake, xFakeLabel], outputPath)
-
-        xFakeOrdered, _ = self.data.generateFakeTrainingSamples(self.generator, self.latentDim, samples, False)
-        outputPath = f'{self.evalDirectoryName}/generated_plot_e{epoch}_ordered.png'
-        self.plotImageSamples(xFakeOrdered, outputPath)
-
-        self.plotHistory(epoch)
-
-    def plotImageSamples(self, samples, outputPath, n=10):
-        images, _ = samples
-        scaledImages = (images + 1) / 2.0 # scale from -1,1 to 0,1
-
-        for i in range(n * n):
-            pyplot.subplot(n, n, i + 1)
-            pyplot.axis('off')
-            pyplot.imshow(scaledImages[i, :, :, 0], cmap='gray_r')
-
-        pyplot.savefig(outputPath)
-        pyplot.close()
-
-    def plotStartingImageSamples(self, samples=150):
-        xReal, _ = self.data.generateRealTrainingSamples(samples)
-        self.plotImageSamples(xReal, f'{self.evalDirectoryName}/target_plot.png')
-
-        xFake, _ = self.data.generateFakeTrainingSamples(self.generator, self.latentDim, samples)
-        self.plotImageSamples(xFake, f'{self.evalDirectoryName}/generated_plot_e0.png')
-
-    def plotHistory(self, epoch):
-        pyplot.subplot(2, 1, 1)
-        pyplot.plot(self.realBinaryLossHistory, label='dRealLoss')
-        pyplot.plot(self.fakeBinaryLossHistory, label='dFakeLoss')
-        pyplot.plot(self.lossHistory, label='gLoss')
-        pyplot.legend()
-
-        pyplot.subplot(2, 1, 2)
-        pyplot.plot(self.realLabelsLossHistory, label='accReal')
-        pyplot.plot(self.fakeLabelsLossHistory, label='accFake')
-        pyplot.legend()
-
-        pyplot.savefig('%s/loss_acc_history_e%03d.png' % (self.evalDirectoryName, epoch))
-        pyplot.close()
-
-    def getElapsedTime(self):
+    def getElapsedTimeStr(self):
         elapsedTime = time.time() - self.startTime
         return str(datetime.timedelta(seconds=elapsedTime))
-
-    def writeTrainingParameters(self):
-        # TODO: write as JSON file
-        params = 'Training Parameters\n'
-        params += '--------------------------------------------------\n'
-        params += f'latentDim: {self.latentDim}\n'
-        params += f'convFilters: {self.convFilters}\n'
-        params += f'convTransposeFilters: {self.convTransposeFilters}\n'
-        params += f'generatorInputFilters: {self.generatorInputFilters}\n'
-        params += f'convLayerKernelSize: {self.convLayerKernelSize}\n'
-        params += f'convTransposeLayerKernelSize: {self.convTransposeLayerKernelSize}\n'
-        params += f'generatorOutputLayerKernelSize: {self.generatorOutputLayerKernelSize}\n'
-        params += f'adamLearningRate: {self.adamLearningRate}\n'
-        params += f'adamBeta1: {self.adamBeta1}\n'
-        params += f'kernelInitStdDev: {self.kernelInitStdDev}\n'
-        params += f'leakyReluAlpha: {self.leakyReluAlpha}\n'
-        params += f'dropoutRate: {self.dropoutRate}\n'
-        params += f'epochs: {self.epochs}\n'
-        params += f'batchSize: {self.batchSize}\n'
-        params += f'evalFreq: {self.evalFreq}\n'
-        params += f'batchesPerEpoch: {self.batchesPerEpoch}\n'
-        params += f'halfBatch: {self.halfBatch}\n'
-        with open(os.path.join(self.evalDirectoryName, 'training_parameters.txt'), mode='w') as fd:
-            fd.write(params)
 
     def summary(self):
         print('\nDiscriminator\n')
