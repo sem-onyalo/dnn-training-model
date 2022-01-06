@@ -20,7 +20,7 @@ class Discriminator:
         self.leakyReluAlpha = params.leakyReluAlpha
         self.dropoutRate = params.dropoutRate
 
-    def buildModel(self) -> Model:
+    def build(self) -> Model:
         # TODO: add parameter to distinguish discriminator type (i.e. for DCGAN or AuxGAN)
 
         init = RandomNormal(stddev=self.kernelInitStdDev)
@@ -65,5 +65,5 @@ class Discriminator:
 
     def summary(self):
         print('\nDiscriminator\n')
-        model = self.buildModel()
+        model = self.build()
         model.summary()

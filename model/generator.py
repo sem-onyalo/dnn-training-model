@@ -21,7 +21,7 @@ class Generator:
         self.leakyReluAlpha = params.leakyReluAlpha
         self.dropoutRate = params.dropoutRate
 
-    def buildModel(self) -> Model:
+    def build(self) -> Model:
         labelInputNodes = self.data.imageDim * self.data.imageDim
         init = RandomNormal(stddev=self.kernelInitStdDev)
 
@@ -63,5 +63,5 @@ class Generator:
 
     def summary(self):
         print('\nGenerator\n')
-        model = self.buildModel()
+        model = self.build()
         model.summary()

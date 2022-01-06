@@ -1,10 +1,8 @@
 import datetime
-import time
 
 from .discriminator import Discriminator
 from .generator import Generator
 from data import Data
-from matplotlib import pyplot
 from storage import StorageLocal
 from tensorflow.keras.layers import BatchNormalization
 from tensorflow.keras.models import Model
@@ -12,7 +10,7 @@ from tensorflow.keras.optimizers import Adam
 
 class AuxiliaryClassifierGAN:
     def __init__(self, data:Data, params=None) -> None:
-        self.trainDateTimeUtc = datetime.MINYEAR
+        self.trainingStartDateTimeUtc = datetime.MINYEAR
         self.evalDirectoryName = params.evalDirLocal
         self.initHyperparameters(params)
         self.initMetricsVars()
@@ -20,12 +18,12 @@ class AuxiliaryClassifierGAN:
         self.data = data
 
         discriminator = Discriminator(data, params)
-        self.discriminator = discriminator.buildModel()
+        self.discriminator = discriminator.build()
         
         generator = Generator(data, params)
-        self.generator = generator.buildModel()
+        self.generator = generator.build()
 
-        self.gan = self.buildModel()
+        self.gan = self.build()
 
     def initHyperparameters(self, params):
         self.adamLearningRate = params.adamLearningRate
@@ -44,8 +42,8 @@ class AuxiliaryClassifierGAN:
         self.generatorOutputLayerKernelSize = (7,7)
 
     def initMetricsVars(self):
-        self.metricHeader = ["Epoch", "Epochs", "Mini-Batch", "Mini-Batches", "Discriminator Loss: Real", "Discriminator Loss: Fake", "GAN Loss"]
-        self.metricHistory = list()
+        self.metricsHeader = ["Epoch", "Epochs", "Mini-Batch", "Mini-Batches", "Discriminator Loss: Real", "Discriminator Loss: Fake", "GAN Loss"]
+        self.metricsHistory = list()
         self.lossHistory = list()
         self.realBinaryLossHistory = list()
         self.realLabelsLossHistory = list()
@@ -54,8 +52,8 @@ class AuxiliaryClassifierGAN:
         self.storage = list()
 
     def initStorage(self):
-        self.trainDateTimeUtc = datetime.datetime.utcnow()
-        self.storage.append(StorageLocal(root=self.evalDirectoryName, datetime=self.trainDateTimeUtc))
+        self.storage.clear()
+        self.storage.append(StorageLocal(root=self.evalDirectoryName, datetime=self.trainingStartDateTimeUtc))
 
     def writeHyperparameters(self):
         hyperparameters = {
@@ -83,7 +81,17 @@ class AuxiliaryClassifierGAN:
         for item in self.storage:
             item.writeHyperparameters(hyperparameters)
 
-    def writeSamplesInit(self, samples=150):
+    def writeModel(self, epoch):
+        for item in self.storage:
+            item.writeModel(epoch, self.generator.save)
+
+    def writeMetrics(self, epoch):
+        for item in self.storage:
+            item.writeMetrics(epoch, self.metricsHistory, self.metricsHeader)
+
+        self.metricsHistory.clear()
+
+    def writeInitImageSamples(self, samples=150):
         xReal, _ = self.data.generateRealTrainingSamples(samples)
         xFake, _ = self.data.generateFakeTrainingSamples(self.generator, self.latentDim, samples)
 
@@ -91,13 +99,7 @@ class AuxiliaryClassifierGAN:
             item.writeTargetSamples(xReal)
             item.writeGeneratedSamples(0, xFake)
 
-    def writeMetrics(self, epoch):
-        for item in self.storage:
-            item.writeMetrics(epoch, self.metricHistory)
-
-        self.metricHistory.clear()
-
-    def writeSamples(self, epoch, samples=150):
+    def writeImageSamples(self, epoch, samples=150):
         xFake, _ = self.data.generateFakeTrainingSamples(self.generator, self.latentDim, samples, False)
 
         for item in self.storage:
@@ -108,7 +110,7 @@ class AuxiliaryClassifierGAN:
             "Epoch": epoch,
             "Real Accuracy": kwargs["realAcc"],
             "Fake Accuracy": kwargs["fakeAcc"],
-            "Elapsed Time": kwargs["elapsedTime"]
+            "Elapsed Time": str(datetime.datetime.utcnow() - self.trainingStartDateTimeUtc)
         }
 
         for item in self.storage:
@@ -128,7 +130,7 @@ class AuxiliaryClassifierGAN:
         for item in self.storage:
             item.writeLossAndAccuracy(epoch, history)
 
-    def buildModel(self) -> Model:
+    def build(self) -> Model:
         for layer in self.discriminator.layers:
             if not isinstance(layer, BatchNormalization):
                 layer.trainable = False
@@ -141,21 +143,20 @@ class AuxiliaryClassifierGAN:
         return model
 
     def train(self, params):
-        self.initStorage()
-
         self.epochs = params.epochs
-        self.batchSize = params.batchsize
         self.evalFreq = params.evalfreq
-        self.batchesPerEpoch = int(self.data.getDatasetShape() / self.batchSize)
+        self.batchSize = params.batchsize
         self.halfBatch = int(self.batchSize / 2)
+        self.batchesPerEpoch = int(self.data.getDatasetShape() / self.batchSize)
+        self.trainingStartDateTimeUtc = datetime.datetime.utcnow()
 
+        self.initStorage()
         self.writeHyperparameters()
-
-        self.writeSamplesInit()
-
-        self.startTime = time.time()
+        self.writeInitImageSamples()
 
         for i in range(self.epochs):
+            print(", ".join([str(i) for i in self.metricsHeader]))
+
             for j in range(self.batchesPerEpoch):
                 [xReal, xRealLabel], yReal = self.data.generateRealTrainingSamples(self.halfBatch)
                 _, dRealLossBinary, dRealLossLabels, _, _ = self.discriminator.train_on_batch(xReal, [yReal, xRealLabel])
@@ -164,7 +165,7 @@ class AuxiliaryClassifierGAN:
                 _, dFakeLossBinary, dFakeLossLabels, _, _ = self.discriminator.train_on_batch(xFake, [yFake, xFakeLabel])
 
                 [xGan, xGanLabel], yGan = self.data.generateFakeTrainingGanSamples(self.latentDim, self.batchSize)
-                _, gLossBinary, gLossLabels = self.gan.train_on_batch([xGan, xGanLabel], [yGan, xGanLabel])
+                _, gLossBinary, _ = self.gan.train_on_batch([xGan, xGanLabel], [yGan, xGanLabel])
 
                 self.realBinaryLossHistory.append(dRealLossBinary)
                 self.realLabelsLossHistory.append(dRealLossLabels)
@@ -173,40 +174,24 @@ class AuxiliaryClassifierGAN:
                 self.lossHistory.append(gLossBinary)
 
                 metrics = [i + 1, self.epochs, j + 1, self.batchesPerEpoch, dRealLossBinary, dFakeLossBinary, gLossBinary]
-                print(list(map(lambda x,y: {x: y}, self.metricHeader, metrics)))
-                self.metricHistory.append(metrics)
-
-                # - DEBUG - DEBUG - DEBUG - DEBUG - DEBUG - DEBUG - DEBUG - DEBUG - DEBUG - DEBUG
-                if j > 4:
-                    break
-
-            self.evaluate(i + 1)
-            return
-            # - DEBUG - DEBUG - DEBUG - DEBUG - DEBUG - DEBUG - DEBUG - DEBUG - DEBUG - DEBUG
+                self.metricsHistory.append(metrics)
+                print(", ".join([str(i) for i in metrics]))
 
             if (i + 1) % self.evalFreq == 0:
                 self.evaluate(i + 1)
 
     def evaluate(self, epoch, samples=150):
         [xReal, xRealLabel], yReal = self.data.generateRealTrainingSamples(samples)
-
-        # TODO: unpack results properly (i.e. figure out which output values are which)
         _, dRealAcc, _, _, _ = self.discriminator.evaluate(xReal, [yReal, xRealLabel])
 
         [xFake, xFakeLabel], yFake = self.data.generateFakeTrainingSamples(self.generator, self.latentDim, samples)
         _, dFakeAcc, _, _, _ = self.discriminator.evaluate(xFake, [yFake, xFakeLabel])
 
-        modelFilename = '%s/generated_model_e%03d.h5' % (self.evalDirectoryName, epoch)
-        # self.generator.save(modelFilename)
-
+        self.writeModel(epoch)
         self.writeMetrics(epoch)
-        self.writeSamples(epoch)
+        self.writeImageSamples(epoch)
         self.writeLossAndAccuracy(epoch)
-        self.writeSummary(epoch, realAcc=dRealAcc, fakeAcc=dFakeAcc, elapsedTime=self.getElapsedTimeStr())
-
-    def getElapsedTimeStr(self):
-        elapsedTime = time.time() - self.startTime
-        return str(datetime.timedelta(seconds=elapsedTime))
+        self.writeSummary(epoch, realAcc=dRealAcc, fakeAcc=dFakeAcc)
 
     def summary(self):
         print('\nDiscriminator\n')

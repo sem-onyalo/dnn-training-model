@@ -19,6 +19,7 @@ if __name__ == '__main__':
     parser.add_argument('--batchsize', '-b', type=int, default=128, help='The training batch size')
     parser.add_argument('--evalfreq', '-v', type=int, default=10, help='Frequency to run model evaluations')
     parser.add_argument('--modelPath', '-p', type=str, default=None, help='Path to model to load. If this is set script will run inference instead of training.')
+    parser.add_argument('--subset', '-s', type=int, default=0, help='Only use a subset of the entire dataset for training. If 0, training will use the entire dataset.')
     
     parser.add_argument('--batchNorm', type=bool, default=True, help='')
     parser.add_argument('--convFilters', type=str, default='128,128', help='')
@@ -33,7 +34,7 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    data = Data()
+    data = Data(subset=args.subset)
 
     if args.inference:
         inference = Inference(data, args.modelPath, args.latentDim)

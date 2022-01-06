@@ -6,6 +6,7 @@ import os
 from matplotlib import pyplot
 
 FILE_ENCODING = "utf-8"
+MODEL_FILE = "model.h5"
 METRICS_FILE = "metrics.csv"
 SUMMARY_FILE = "summary.json"
 HYPERPARAMETERS_FILE = "hyperparameters.json"
@@ -77,11 +78,11 @@ class StorageLocal:
         with open(path, mode="w", encoding=FILE_ENCODING) as fd:
             fd.write(jsonObj)
 
-    def writeMetrics(self, epoch:int, metrics:list):
+    def writeMetrics(self, epoch:int, metrics:list, header:list):
         path = os.path.join(self.getEpochDirectory(epoch), METRICS_FILE)
-        with open(path, mode="w", newline="\n") as fd:
+        with open(path, mode="w", newline="") as fd:
             writer = csv.writer(fd)
-            # writer.writerow(metrics)
+            writer.writerow(header)
             writer.writerows(metrics)
 
     def writeLossAndAccuracy(self, epoch, obj):
@@ -99,3 +100,7 @@ class StorageLocal:
         path = os.path.join(self.getEpochDirectory(epoch), LOSS_ACCURACY_FILE)
         pyplot.savefig(path)
         pyplot.close()
+
+    def writeModel(self, epoch, function):
+        path = os.path.join(self.getEpochDirectory(epoch), MODEL_FILE)
+        function(path)

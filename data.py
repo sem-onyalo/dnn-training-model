@@ -7,10 +7,13 @@ from tensorflow.keras.datasets.fashion_mnist import load_data
 from tensorflow.keras.models import Model
 
 class Data():
-    def __init__(self) -> None:
+    def __init__(self, **kwargs) -> None:
+        kwargs.setdefault("subset", 0)
+
         self.classes = 10
         self.imageDim = 7
         self.imageShape = (28,28,1)
+        self.dataSubset = kwargs["subset"]
         self.dataset = self.loadDataset()
 
     def getDatasetShape(self):
@@ -18,12 +21,17 @@ class Data():
         return images.shape[0]
 
     def loadDataset(self):
-        (trainX, y), (_, _) = load_data()
-        X = expand_dims(trainX, axis=-1)
+        (x_train, y_train), (_, _) = load_data()
+        
+        if self.dataSubset > 0:
+            ix = randint(0, x_train.shape[0], self.dataSubset)
+            x_train, y_train = x_train[ix], y_train[ix]
+
+        X = expand_dims(x_train, axis=-1)
         X = X.numpy() if executing_eagerly() else X.eval(session=compat.v1.Session())
         X = X.astype('float32')
         X = (X - 127.5) / 127.5 # scale from 0,255 to -1,1
-        return [X, y]
+        return [X, y_train]
 
     def generateRealTrainingSamples(self, samples):
         images, labels = self.dataset
