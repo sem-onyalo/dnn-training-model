@@ -1,17 +1,28 @@
+import config
+import csv
 import datetime
+import h5py
+import json
+import io
+import math
 
 from .discriminator import Discriminator
 from .generator import Generator
+from constants import CLOUD_STORAGE_AWS_S3
 from data import Data
-from storage import StorageLocal
+from matplotlib import pyplot
+from storage import StorageLocal, StorageAwsS3
 from tensorflow.keras.layers import BatchNormalization
 from tensorflow.keras.models import Model
 from tensorflow.keras.optimizers import Adam
+from tensorflow.python.keras.saving import hdf5_format
 
 class AuxiliaryClassifierGAN:
     def __init__(self, data:Data, params=None) -> None:
         self.trainingStartDateTimeUtc = datetime.MINYEAR
         self.evalDirectoryName = params.evalDirLocal
+        self.cloudStorageType = params.cloudStorageType
+
         self.initHyperparameters(params)
         self.initMetricsVars()
 
@@ -55,6 +66,25 @@ class AuxiliaryClassifierGAN:
         self.storage.clear()
         self.storage.append(StorageLocal(root=self.evalDirectoryName, datetime=self.trainingStartDateTimeUtc))
 
+        if self.cloudStorageType == CLOUD_STORAGE_AWS_S3:
+            self.storage.append(StorageAwsS3(datetime=self.trainingStartDateTimeUtc))
+
+    def getImagePlots(self, images, samples) -> io.BytesIO:
+        scaledImages = (images + 1) / 2.0 # scale from -1,1 to 0,1
+
+        n = int(math.sqrt(samples))
+        for i in range(n * n):
+            pyplot.subplot(n, n, i + 1)
+            pyplot.axis('off')
+            pyplot.imshow(scaledImages[i, :, :, 0], cmap='gray_r')
+
+        buffer = io.BytesIO()
+        pyplot.savefig(buffer)
+        pyplot.close()
+        buffer.seek(0)
+
+        return buffer
+
     def writeHyperparameters(self):
         hyperparameters = {
             "latentDim": self.latentDim,
@@ -78,32 +108,27 @@ class AuxiliaryClassifierGAN:
             "generatorOutputLayerKernelSize": self.generatorOutputLayerKernelSize
         }
 
-        for item in self.storage:
-            item.writeHyperparameters(hyperparameters)
-
-    def writeModel(self, epoch):
-        for item in self.storage:
-            item.writeModel(epoch, self.generator.save)
-
-    def writeMetrics(self, epoch):
-        for item in self.storage:
-            item.writeMetrics(epoch, self.metricsHistory, self.metricsHeader)
-
-        self.metricsHistory.clear()
-
-    def writeInitImageSamples(self, samples=150):
-        xReal, _ = self.data.generateRealTrainingSamples(samples)
-        xFake, _ = self.data.generateFakeTrainingSamples(self.generator, self.latentDim, samples)
+        serialized = json.dumps(hyperparameters, indent=4)
+        bytesObj = serialized.encode()
 
         for item in self.storage:
-            item.writeTargetSamples(xReal)
-            item.writeGeneratedSamples(0, xFake)
+            item.writeBytes(config.hyperparameters_file, bytesObj)
 
-    def writeImageSamples(self, epoch, samples=150):
-        xFake, _ = self.data.generateFakeTrainingSamples(self.generator, self.latentDim, samples, False)
+    def writeInitImageSamples(self, samples=100):
+        [images, _], _ = self.data.generateRealTrainingSamples(samples)
+        buffer = self.getImagePlots(images, samples)
 
         for item in self.storage:
-            item.writeGeneratedSamples(epoch, xFake)
+            item.writeBytes(config.target_samples_file, buffer.getvalue())
+
+        self.writeImageSamples(0)
+
+    def writeImageSamples(self, epoch, samples=100):
+        [images, _], _ = self.data.generateFakeTrainingSamples(self.generator, self.latentDim, samples, False)
+        buffer = self.getImagePlots(images, samples)
+
+        for item in self.storage:
+            item.writeBytes(config.generated_samples_file, buffer.getvalue(), [config.epoch_directory, str(epoch)])
 
     def writeSummary(self, epoch, **kwargs):
         summary = {
@@ -113,22 +138,52 @@ class AuxiliaryClassifierGAN:
             "Elapsed Time": str(datetime.datetime.utcnow() - self.trainingStartDateTimeUtc)
         }
 
-        for item in self.storage:
-            item.writeSummary(epoch, summary)
-
         print(f'Summary: {summary}')
 
-    def writeLossAndAccuracy(self, epoch):
-        history = {
-            "dLossReal": self.realBinaryLossHistory,
-            "dLossFake": self.fakeBinaryLossHistory,
-            "gLoss": self.lossHistory,
-            "accReal": self.realLabelsLossHistory,
-            "accFake": self.fakeLabelsLossHistory
-        }
+        serialized = json.dumps(summary, indent=4)
+        bytesObj = serialized.encode()
 
         for item in self.storage:
-            item.writeLossAndAccuracy(epoch, history)
+            item.writeBytes(config.summary_file, bytesObj, [config.epoch_directory, str(epoch)])
+
+    def writeMetrics(self, epoch):
+        buffer = io.StringIO()
+        writer = csv.writer(buffer)
+        writer.writerow(self.metricsHeader)
+        writer.writerows(self.metricsHistory)
+
+        for item in self.storage:
+            item.writeBytes(config.metrics_file, buffer.getvalue().encode(), [config.epoch_directory, str(epoch)])
+
+        self.metricsHistory.clear()
+
+    def writeLossAndAccuracy(self, epoch):
+        pyplot.subplot(2, 1, 1)
+        pyplot.plot(self.realBinaryLossHistory, label='D-Loss-Real')
+        pyplot.plot(self.fakeBinaryLossHistory, label='D-Loss-Fake')
+        pyplot.plot(self.lossHistory, label='G-Loss')
+        pyplot.legend()
+
+        pyplot.subplot(2, 1, 2)
+        pyplot.plot(self.realLabelsLossHistory, label='Acc-Real')
+        pyplot.plot(self.fakeLabelsLossHistory, label='Acc-Fake')
+        pyplot.legend()
+
+        buffer = io.BytesIO()
+        pyplot.savefig(buffer)
+        pyplot.close()
+        buffer.seek(0)
+
+        for item in self.storage:
+            item.writeBytes(config.loss_accuracy_file, buffer.getvalue(), [config.epoch_directory, str(epoch)])
+
+    def writeModel(self, epoch):
+        buffer = io.BytesIO()
+        with h5py.File(buffer, "w") as fd:
+            hdf5_format.save_weights_to_hdf5_group(fd, self.generator.layers)
+
+        for item in self.storage:
+            item.writeBytes(config.model_file, buffer.getvalue(), [config.epoch_directory, str(epoch)])
 
     def build(self) -> Model:
         for layer in self.discriminator.layers:
