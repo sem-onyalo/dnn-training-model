@@ -1,6 +1,7 @@
 import os
 
-cloud_blob_root = os.environ.get("CLOUD_BLOB_ROOT", "gan-training-storage")
+cloud_storage_container = os.environ.get("CLOUD_STORAGE_CONTAINER", "gan-training-storage")
+cloud_storage_account = os.environ.get("CLOUD_STORAGE_ACCOUNT", "5d1796b484c2431eb911")
 epoch_directory = os.environ.get("EPOCH_DIRECTORY", "epoch")
 generated_samples_file = os.environ.get("GENERATED_SAMPLES_FILE", "generated.png")
 hyperparameters_file = os.environ.get("HYPERPARAMETERS_FILE", "hyperparameters.json")

@@ -6,7 +6,7 @@ from .storage import Storage
 class StorageAwsS3(Storage):
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
-        self.bucket = boto3.resource("s3").Bucket(config.cloud_blob_root)
+        self.bucket = boto3.resource("s3").Bucket(config.cloud_storage_container)
 
     def writeBytes(self, filename, obj, path_parts=[]):
         parts = [p for p in path_parts]

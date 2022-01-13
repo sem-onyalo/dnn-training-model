@@ -6,9 +6,11 @@ import json
 import io
 import math
 
+from storage.azure import StorageAzure
+
 from .discriminator import Discriminator
 from .generator import Generator
-from constants import CLOUD_STORAGE_AWS_S3
+from constants import CLOUD_STORAGE_AWS_S3, CLOUD_STORAGE_AZURE
 from data import Data
 from matplotlib import pyplot
 from storage import StorageLocal, StorageAwsS3
@@ -68,6 +70,8 @@ class AuxiliaryClassifierGAN:
 
         if self.cloudStorageType == CLOUD_STORAGE_AWS_S3:
             self.storage.append(StorageAwsS3(datetime=self.trainingStartDateTimeUtc))
+        elif self.cloudStorageType == CLOUD_STORAGE_AZURE:
+            self.storage.append(StorageAzure(datetime=self.trainingStartDateTimeUtc))
 
     def getImagePlots(self, images, samples) -> io.BytesIO:
         scaledImages = (images + 1) / 2.0 # scale from -1,1 to 0,1

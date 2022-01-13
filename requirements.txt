@@ -1,3 +1,5 @@
+azure-identity==1.7.1
+azure-storage-blob==12.9.0
 boto3==1.20.30
 matplotlib==3.4.2
 numpy==1.19.5
